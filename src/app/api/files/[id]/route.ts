@@ -12,7 +12,8 @@ cloudinary.config({
 });
 
 export const DELETE = withAuth(async (_req, { params }) => {
-  const { id } = await params;
+  const id = params?.id;
+  if (!id) throw new AppError("Missing file ID", 400);
 
   const file = await prisma.file.findUnique({ where: { id } });
   if (!file) throw new AppError("File not found", 404);
