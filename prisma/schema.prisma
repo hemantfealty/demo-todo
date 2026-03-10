@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  todos     Todo[]
+}
+
+model Todo {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  category    String      @default("OTHER")
+  priority    String      @default("MEDIUM")
+  status      String      @default("PENDING")
+  dueDate     DateTime?
+  order       Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subTasks    SubTask[]
+  files       File[]
+}
+
+model SubTask {
+  id        String  @id @default(cuid())
+  title     String
+  completed Boolean @default(false)
+  todoId    String
+  todo      Todo    @relation(fields: [todoId], references: [id], onDelete: Cascade)
+}
+
+model File {
+  id        String  @id @default(cuid())
+  fileName  String
+  filePath  String
+  fileType  String
+  fileSize  Int
+  publicId  String?
+  todoId    String
+  todo      Todo    @relation(fields: [todoId], references: [id], onDelete: Cascade)
+}
