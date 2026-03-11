@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { GenerateButton } from "@/components/ai/GenerateButton";
 import { FileUpload } from "@/components/files/FileUpload";
 import { fileService } from "@/services/fileService";
 import { aiService } from "@/services/aiService";
+import { parseDateFromText } from "@/lib/parse-date";
 import { CATEGORIES, PRIORITIES } from "@/constants";
 import type { Todo, TodoFile, CreateTodoInput } from "@/types";
 
@@ -56,6 +57,15 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<TodoFile[]>(initialData?.files ?? []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-detect due date from title
+  useEffect(() => {
+    if (initialData) return; // skip for edit mode
+    const detected = parseDateFromText(form.title);
+    if (detected) {
+      setForm((f) => ({ ...f, dueDate: detected }));
+    }
+  }, [form.title, initialData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -109,48 +119,22 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handleGenerateDescription() {
+  async function handleGenerateAll() {
     if (!form.title.trim()) { toast.warning("Enter a title first"); return; }
     try {
-      const desc = await aiService.generateDescription(form.title);
-      setForm((f) => ({ ...f, description: desc }));
-      toast.success("Description generated!");
+      const result = await aiService.generateAll(form.title);
+      setForm((f) => ({
+        ...f,
+        description: result.description || f.description,
+        category: result.category || f.category,
+        priority: result.priority || f.priority,
+      }));
+      if (result.suggestions.length > 0 && !initialData) {
+        setSuggestedSubTasks(result.suggestions);
+      }
+      toast.success("AI filled in all fields!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI unavailable. Please fill in manually.");
-    }
-  }
-
-  async function handleAutoCategorize() {
-    if (!form.title.trim()) { toast.warning("Enter a title first"); return; }
-    try {
-      const category = await aiService.categorize(form.title);
-      setForm((f) => ({ ...f, category }));
-      toast.success("Category auto-detected!");
-    } catch {
-      toast.error("AI unavailable. Please select manually.");
-    }
-  }
-
-  async function handleAutoPrioritize() {
-    if (!form.title.trim()) { toast.warning("Enter a title first"); return; }
-    try {
-      const priority = await aiService.prioritize(form.title);
-      setForm((f) => ({ ...f, priority }));
-      toast.success("Priority auto-set!");
-    } catch {
-      toast.error("AI unavailable. Please select manually.");
-    }
-  }
-
-  async function handleSuggestSubTasks() {
-    if (!form.title.trim()) { toast.warning("Enter a title first"); return; }
-    try {
-      const suggestions = await aiService.suggest(form.title);
-      if (suggestions.length === 0) { toast.warning("No suggestions returned"); return; }
-      setSuggestedSubTasks(suggestions);
-      toast.success(`${suggestions.length} subtasks suggested!`);
-    } catch {
-      toast.error("AI unavailable. Please add subtasks manually.");
     }
   }
 
@@ -164,9 +148,12 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Title */}
+          {/* Title + AI Generate */}
           <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="title">Title *</Label>
+              <GenerateButton onClick={handleGenerateAll} disabled={noTitle} label="AI Generate" />
+            </div>
             <Input
               id="title"
               placeholder="What needs to be done?"
@@ -176,12 +163,9 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
             />
           </div>
 
-          {/* Description + AI Generate */}
+          {/* Description */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="description">Description</Label>
-              <GenerateButton onClick={handleGenerateDescription} disabled={noTitle} label="AI Generate" />
-            </div>
+            <Label htmlFor="description">Description</Label>
             <Textarea
               id="description"
               placeholder="Add more details..."
@@ -191,13 +175,10 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
             />
           </div>
 
-          {/* Category + Priority with AI */}
+          {/* Category + Priority */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Category</Label>
-                <GenerateButton onClick={handleAutoCategorize} disabled={noTitle} label="Auto" className="h-6 text-xs px-2" />
-              </div>
+              <Label>Category</Label>
               <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as CreateTodoInput["category"] })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -209,10 +190,7 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Priority</Label>
-                <GenerateButton onClick={handleAutoPrioritize} disabled={noTitle} label="Auto" className="h-6 text-xs px-2" />
-              </div>
+              <Label>Priority</Label>
               <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v as CreateTodoInput["priority"] })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -236,27 +214,22 @@ export function TodoForm({ open, onClose, onSubmit, initialData, onFilesChange, 
           </div>
 
           {/* AI Sub-task Suggestions — only on create */}
-          {!initialData && (
+          {!initialData && suggestedSubTasks.length > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Sub-task Suggestions</Label>
-                <GenerateButton onClick={handleSuggestSubTasks} disabled={noTitle} label="AI Suggest" />
+              <Label>Sub-task Suggestions</Label>
+              <div className="flex flex-wrap gap-2 p-3 bg-muted rounded-lg">
+                {suggestedSubTasks.map((s, i) => (
+                  <Badge key={i} variant="secondary" className="gap-1 pr-1">
+                    {s}
+                    <button type="button" onClick={() => setSuggestedSubTasks((p) => p.filter((_, j) => j !== i))}>
+                      <X className="h-3 w-3 ml-1 hover:text-destructive" />
+                    </button>
+                  </Badge>
+                ))}
+                <p className="w-full text-xs text-muted-foreground mt-1">
+                  These will be added as subtasks when you create the task.
+                </p>
               </div>
-              {suggestedSubTasks.length > 0 && (
-                <div className="flex flex-wrap gap-2 p-3 bg-muted rounded-lg">
-                  {suggestedSubTasks.map((s, i) => (
-                    <Badge key={i} variant="secondary" className="gap-1 pr-1">
-                      {s}
-                      <button type="button" onClick={() => setSuggestedSubTasks((p) => p.filter((_, j) => j !== i))}>
-                        <X className="h-3 w-3 ml-1 hover:text-destructive" />
-                      </button>
-                    </Badge>
-                  ))}
-                  <p className="w-full text-xs text-muted-foreground mt-1">
-                    These will be added as subtasks when you create the task.
-                  </p>
-                </div>
-              )}
             </div>
           )}
 
